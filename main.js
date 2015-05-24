@@ -25,7 +25,11 @@ function load() {
     }
     if (typeof(gridTop) != 'number') gridTop = 0;
     render();
+    doSync();
   });
+}
+
+function doSync() {
 }
 
 var pending = false;
@@ -419,5 +423,12 @@ window.onresize = resize;
 resize();
 renderPalette();
 window.setTimeout(load, 0);
+
+var socket = io.connect('http://localhost');
+socket.on('assignId', function (data) {
+  console.log("assignId", data);
+  //socket.emit('my other event', { my: 'data' });
+});
+
 
 })();
