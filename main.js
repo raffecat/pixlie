@@ -8,6 +8,7 @@ var db = level('./mydb');
 
 var gridTop = 0;
 var grid = null;
+var myId = null;
 
 function load() {
   db.get('local', function (err, value) {
@@ -17,11 +18,13 @@ function load() {
       if (obj && obj.grid) {
         gridTop = obj.gridTop;
         grid = obj.grid;
+        myId = obj.myId;
       }
     }
     if (!grid) {
       gridTop = 0;
       grid = [[0,0]];
+      myId = null;
     }
     if (typeof(gridTop) != 'number') gridTop = 0;
     render();
@@ -29,7 +32,34 @@ function load() {
   });
 }
 
+var socket;
+
 function doSync() {
+  socket = io.connect('http://localhost');
+  socket.on('sync', function (data) {
+    if (!myId) {
+      // no ID, start by getting one.
+      console.log("requesting an id");
+      socket.emit('getID', {});
+    } else {
+      // have an id, so now try to push our layer.
+      pushLayer();
+    }
+  });
+
+  socket.on('assignID', function (data) {
+    console.log("received an id", data);
+    if (data && data.id && !myId) {
+      myId = data.id;
+      // autosave
+      if (!pending) {
+        pending = true;
+        window.setTimeout(saveNow, 2000);
+      }
+      // have an id, so now try to push our layer.
+      pushLayer();
+    }
+  });
 }
 
 var pending = false;
@@ -39,7 +69,8 @@ function saveNow(cb) {
   saving = true;
   var obj = {
     gridTop: gridTop,
-    grid: grid
+    grid: grid,
+    myId: myId
   };
   var data = JSON.stringify(obj);
   db.put('local', data, function (err) {
@@ -47,6 +78,15 @@ function saveNow(cb) {
     saving = false;
     if (cb) cb();
   });
+}
+
+function pushLayer() {
+  var obj = {
+    gridTop: gridTop,
+    grid: grid,
+    myId: myId
+  };
+  socket.emit("pushLayer", obj);
 }
 
 var canvas = document.getElementById('c');
@@ -423,12 +463,6 @@ window.onresize = resize;
 resize();
 renderPalette();
 window.setTimeout(load, 0);
-
-var socket = io.connect('http://localhost');
-socket.on('assignId', function (data) {
-  console.log("assignId", data);
-  //socket.emit('my other event', { my: 'data' });
-});
 
 
 })();
