@@ -1,0 +1,17 @@
+{
+  "name": "pixlie",
+  "version": "0.0.1",
+  "description": "Pixel wall for CampJS",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "browserify main.js -o bundle.js",
+    "watch": "watchify main.js -o bundle.js --debug --verbose"
+  },
+  "author": "atowers@gmail.com",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.12.4",
+    "level-browserify": "^0.19.1"
+  }
+}
