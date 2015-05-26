@@ -1,3 +1,5 @@
+// Pixel Anarchy
+
 var level = require('level-browserify');
 
 (function(){
@@ -10,9 +12,40 @@ var gridTop = 0;
 var grid = null;
 var myId = null;
 
+var msgTimer = null;
+var msgFade = 1.0;
+function showMsg(msg, time) {
+  var text = document.getElementById("msgline");
+  var div = document.getElementById("msg");
+  if (div && text) {
+    text.innerHTML = msg;
+    div.style.display = "block";
+    div.style.opacity = 1.0;
+    msgFade = 1.0;
+    if (msgTimer) window.cancelTimeout(msgTimer);
+    msgTimer = window.setTimeout(fadeMsg, time || 3000);
+  }
+}
+function fadeMsg() {
+  msgTimer = null;
+  var div = document.getElementById("msg");
+  if (div) {
+    msgFade -= 0.1;
+    if (msgFade > 0) {
+      div.style.opacity = msgFade;
+      msgTimer = window.setTimeout(fadeMsg, 50);
+    } else {
+      div.style.display = "none";
+    }
+  }
+}
+
 function load() {
   db.get('local', function (err, value) {
-    if (err) return console.log('Ooops!', err);
+    if (err) {
+      showMsg("Could not restore your pixels!");
+      return console.log('Could not restore:', err);
+    }
     if (value && !err) {
       obj = JSON.parse(value);
       if (obj && obj.grid) {
@@ -28,6 +61,7 @@ function load() {
     }
     if (typeof(gridTop) != 'number') gridTop = 0;
     render();
+    showMsg("Ready!", 1000);
     doSync();
   });
 }
@@ -35,7 +69,14 @@ function load() {
 var socket;
 
 function doSync() {
-  socket = io.connect('http://localhost');
+  if (!window.io) {
+    return console.log("Missing socket.io");
+  }
+
+  console.log("Starting sync: ", window.location.host);
+  socket = io.connect('http://'+window.location.host);
+  console.log("Created io socket");
+
   socket.on('sync', function (data) {
     if (!myId) {
       // no ID, start by getting one.
@@ -74,7 +115,10 @@ function saveNow(cb) {
   };
   var data = JSON.stringify(obj);
   db.put('local', data, function (err) {
-    if (err) return console.log('Ooops!', err);
+    if (err) {
+      showMsg("Could not save your pixels!");
+      return console.log('Could not save:', err);
+    }
     saving = false;
     if (cb) cb();
   });
@@ -82,9 +126,9 @@ function saveNow(cb) {
 
 function pushLayer() {
   var obj = {
+    id: myId,
     gridTop: gridTop,
-    grid: grid,
-    myId: myId
+    grid: grid
   };
   socket.emit("pushLayer", obj);
 }

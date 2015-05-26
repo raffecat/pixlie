@@ -5,9 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "browserify main.js -o bundle.js",
+    "make": "browserify main.js -o bundle.js",
     "watch": "watchify main.js -o bundle.js --debug --verbose",
-    "wiz": "wzrd main.js:bundle.js"
+    "dev": "wzrd main.js:bundle.js"
   },
   "author": "atowers@gmail.com",
   "license": "MIT",
