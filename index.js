@@ -1,4 +1,5 @@
 var express = require('express');
+var sockjs = require('sockjs');
 var uid = require('uid2');
 
 var MongoClient = require('mongodb').MongoClient;
@@ -6,7 +7,6 @@ var ObjectID = require('mongodb').ObjectID;
 
 var app = express();
 var server = require('http').Server(app);
-var io = require('socket.io')(server);
 
 var url = 'mongodb://localhost:27017/pixlie';
 MongoClient.connect(url, function(err, db) {
@@ -38,27 +38,38 @@ MongoClient.connect(url, function(err, db) {
   }
 
   app.use(express.static('.'));
-  server.listen(9966);
 
   app.get('/', function (req, res) {
     res.sendfile(__dirname + '/index.html');
   });
 
-  io.on('connection', function (socket) {
-    // kick off a sync operation by sending the client a sync message.
-    socket.emit('sync', {});
+  var sockServ = sockjs.createServer({
+    sockjs_url: 'http://cdn.jsdelivr.net/sockjs/1.0.0/sockjs.min.js',
+    prefix: '/socket'
+  });
+
+  sockServ.on('connection', function(conn) {
+    console.log("SockJS connection");
+
+    function send(data) {
+      if (conn.writable) {
+        conn.write(JSON.stringify(data));
+      }
+    }
+
+    var sockOps = {};
 
     // the client will send this if it needs an id for the device.
-    socket.on('getID', function (data) {
+    sockOps['getID'] = function (data) {
       console.log("getID", data);
       assignID(function (err, id) {
         if (err) return console.log(err);
-        if (id) socket.emit("assignID", {id:id});
+        if (id) send({ op: "assignID", id: id });
       });
-    });
+    };
 
     // the client will send this when it has changes to upload.
-    socket.on('pushLayer', function (data) {
+    sockOps['pushLayer'] = function (data) {
       if (data) {
         console.log("pushLayer", data.id, data.gridTop, data.grid && data.grid.length);
       }
@@ -71,16 +82,36 @@ MongoClient.connect(url, function(err, db) {
           if (obj) {
             // valid id, accept the layer data.
             layerData.update({_id:saveId}, data, {upsert:true}, function (err) {
-              if (err) console.log(err);
+              if (err) return console.log(err);
+              console.log("Saved layer data.");
+              send({ op: "didPush" });
             });
+          } else {
+            console.log("Did not find layer.");
           }
         });
       } else {
         console.log("Bad push data.");
       }
+    };
+
+    conn.on('data', function(message) {
+      var msg = JSON.parse(message);
+      //conn.write(message);
+      console.log("SockJS data", Object.keys(msg));
+      var fun = sockOps[msg.op];
+      if (fun) { fun(msg); }
+      else console.log("Bad message:", msg);
+    });
+
+    conn.on('close', function() {
+      console.log("SockJS close");
     });
 
   });
+
+  sockServ.installHandlers(server);
+  server.listen(9966);
 
   //db.close();
 });

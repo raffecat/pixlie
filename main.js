@@ -66,46 +66,79 @@ function load() {
   });
 }
 
-var socket;
+var sock;
+var sockOps = {};
+var backoff = 10000;
+var needPush = true;
+var pushing = false;
+function send(data) {
+  sock.send(JSON.stringify(data));
+}
 
 function doSync() {
-  if (!window.io) {
-    return console.log("Missing socket.io");
+  if (!window.SockJS) {
+    return console.log("Missing SockJS");
   }
 
   console.log("Starting sync: ", window.location.host);
-  socket = io.connect('http://'+window.location.host);
-  console.log("Created io socket");
-
-  socket.on('sync', function (data) {
+  sock = new SockJS('http://'+window.location.host+'/socket');
+  sock.onopen = function() {
+    console.log('SockJS open');
+    var backoff = 10000;
+    document.getElementById('status').innerHTML = "ONLINE";
+    // obtain a unique ID for this device if we don't have one.
     if (!myId) {
       // no ID, start by getting one.
-      console.log("requesting an id");
-      socket.emit('getID', {});
+      console.log("Requesting an ID.");
+      send({ op: 'getID' });
     } else {
       // have an id, so now try to push our layer.
+      console.log("Have an ID: "+myId);
       pushLayer();
     }
-  });
-
-  socket.on('assignID', function (data) {
-    console.log("received an id", data);
-    if (data && data.id && !myId) {
-      myId = data.id;
-      // autosave
-      if (!pending) {
-        pending = true;
-        window.setTimeout(saveNow, 2000);
-      }
-      // have an id, so now try to push our layer.
-      pushLayer();
-    }
-  });
+  };
+  sock.onmessage = function(e) {
+    console.log('SockJS message', e.data);
+    var msg = JSON.parse(e.data);
+    var fun = sockOps[msg.op];
+    if (fun) fun(msg);
+  };
+  sock.onclose = function() {
+    console.log('SockJS close');
+    document.getElementById('status').innerHTML = "OFFLINE";
+    backoff = Math.floor(backoff * 1.3);
+    if (backoff > 300000) backoff = 300000;
+    window.setTimeout(doSync, backoff);
+  };
 }
+
+sockOps['assignID'] = function (data) {
+  console.log("Received an ID", data);
+  if (data && data.id && !myId) {
+    myId = data.id;
+    // autosave the ID and push the layer.
+    dirty();
+  }
+};
+
+sockOps['didPush'] = function (data) {
+  console.log("Did push layer.");
+  pushing = false;
+  if (needPush) pushLayer();
+};
 
 var pending = false;
 var saving = false;
+function dirty() {
+  if (!pending) {
+    console.log("Dirty.");
+    pending = true;
+    needPush = true;
+    window.setTimeout(saveNow, 2000);
+  }
+}
 function saveNow(cb) {
+  console.log("Saving now.");
   pending = false;
   saving = true;
   var obj = {
@@ -120,17 +153,21 @@ function saveNow(cb) {
       return console.log('Could not save:', err);
     }
     saving = false;
+    if (needPush) pushLayer();
     if (cb) cb();
   });
 }
 
 function pushLayer() {
-  var obj = {
+  console.log("Pushing now.");
+  needPush = false;
+  pushing = true;
+  send({
+    op: 'pushLayer',
     id: myId,
     gridTop: gridTop,
     grid: grid
-  };
-  socket.emit("pushLayer", obj);
+  });
 }
 
 var canvas = document.getElementById('c');
@@ -265,10 +302,7 @@ function point(x, y, val) {
     row[x+1] = val; // advance past row origin at index zero
   }
   // autosave
-  if (!pending) {
-    pending = true;
-    window.setTimeout(saveNow, 2000);
-  }
+  dirty();
 }
 
 window.document.body.addEventListener("mousedown", mouseDown, false);
@@ -302,6 +336,10 @@ window.document.body.addEventListener("touchend", touchEnd, false);
 
 function onKeyDown(e) {
   var e = e || window.event;
+  if (e.keyCode == 27) {
+    // Prevent ESC in Firefox < 20 closing the socket.
+    e.preventDefault();
+  }
   if (e.keyCode == 32 || e.which == 32) {
     panHeld = true;
     canvas.style.cursor = "grab";
@@ -338,9 +376,9 @@ function onWheel(e) {
 
 canvas.style.cursor = "crosshair";
 
-window.document.body.onkeydown = onKeyDown;
-window.document.body.onkeyup = onKeyUp;
-window.document.body.addEventListener("wheel", onWheel, false);
+window.addEventListener('keydown', onKeyDown, false);
+window.addEventListener('keyup', onKeyUp, false);
+window.addEventListener('wheel', onWheel, false);
 
 
 
