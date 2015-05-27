@@ -145,7 +145,7 @@ MongoClient.connect(url, function(err, db) {
   });
 
   sockServ.installHandlers(server);
-  server.listen(80);
+  server.listen(+process.argv[2] || 80);
 
   //db.close();
 });

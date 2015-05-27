@@ -69,7 +69,6 @@ function load() {
     if (!myLayer.grid) myLayer.grid = [[0,0]];
     if (typeof(myLayer.gridTop) != 'number') myLayer.gridTop = 0;
     loaded = true;
-    render();
     doSync();
   });
 }
@@ -108,6 +107,9 @@ var sockOps = {};
 var backoff = 10000;
 var needPush = true;
 var pushing = false;
+var layers = [];
+var pullTimer = null;
+
 function send(data) {
   if (sock) {
     sock.send(JSON.stringify(data));
@@ -115,9 +117,6 @@ function send(data) {
 }
 
 function doSync() {
-  if (!window.SockJS) {
-    return console.log("Missing SockJS");
-  }
   console.log("Starting sync: ", window.location.host);
   sock = new SockJS('http://'+window.location.host+'/socket');
   sock.onopen = function() {
@@ -154,6 +153,8 @@ function doSync() {
     if (backoff > 300000) backoff = 300000;
     window.setTimeout(doSync, backoff);
     showMsg("Offline!", 1000);
+    if (!layers.length) layers.push(myLayer);
+    render();
   };
 }
 
@@ -204,7 +205,6 @@ function pullIndex() {
   send({ op: 'getIndex' });
 }
 
-var layers = [];
 function sortLayers() {
   layers.sort(function(a,b){
     var ad = a.depth || 0;
@@ -261,10 +261,11 @@ sockOps['index'] = function (data) {
   }
   // sort layers for rendering.
   sortLayers();
+  // render what we have.
+  render();
+  // pull down layers that have changed.
   pullDownLayers();
 };
-
-var pullTimer = null;
 
 function pullDownLayers() {
   if (!pullTimer && sock) {
@@ -298,11 +299,12 @@ var gettingCB = null;
 function loadLayer(id, layer, cb) {
   // check if we have a local copy of this layer.
   console.log("Loading layer:", id);
-  db.get(layer.id, function (err, value) {
+  db.get(id, function (err, value) {
     if (err && err.name != "NotFoundError") {
       return cb(err);
     }
     if (value) {
+      console.log("Found layer in local DB:", id);
       try {
         var obj = JSON.parse(value);
       } catch (err) {
@@ -314,6 +316,8 @@ function loadLayer(id, layer, cb) {
         layer.gridTop = obj.gridTop;
         layer.grid = obj.grid;
         return cb(null);
+      } else {
+        console.log("Layer in local DB is out of date:", id, "local:", obj.ver, "remote:", layer.ver);
       }
     }
     // the server version differs, or we don't have a local copy yet.
@@ -337,6 +341,15 @@ sockOps['didLoad'] = function (data) {
       gettingLayer.ver = data.ver;
       gettingLayer.gridTop = data.gridTop;
       gettingLayer.grid = data.grid;
+      // save the layer in the local db.
+      db.put(data.id, JSON.stringify(data), function (err) {
+        if (err) {
+          // not a problem, it's only a cache.
+          console.log("Could not store downloaded layer in local DB:", data.id, err);
+        } else {
+          console.log("Saved downloaded layer in local DB:", data.id);
+        }
+      });
     } else {
       err = data.error || "invalid layer data";
     }
