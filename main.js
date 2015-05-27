@@ -466,26 +466,26 @@ function mouseDown(e) {
     painting = false;
     panOrgX = e.clientX;
     panOrgY = e.clientY;
-    return;
+  } else {
+    painting = true;
+    panning = false;
+    // map screen space to view space.
+    var ptX = -width/2 + e.clientX;
+    var ptY = -height/2 + e.clientY;
+    // map view space to cell coordinates.
+    var cx = Math.floor((orgX + ptX) / zoom);
+    var cy = Math.floor((orgY + ptY) / zoom);
+    line(lastX, lastY, cx, cy, e.button ? 0 : pen);
+    lastX = cx;
+    lastY = cy;
   }
-  painting = true;
-  panning = false;
-  if (e.button === 0) val = 1; else val = 0;
-  // map screen space to view space.
-  var ptX = -width/2 + e.clientX;
-  var ptY = -height/2 + e.clientY;
-  // map view space to cell coordinates.
-  var cx = Math.floor((orgX + ptX) / zoom);
-  var cy = Math.floor((orgY + ptY) / zoom);
-  line(lastX, lastY, cx, cy, pen);
-  lastX = cx;
-  lastY = cy;
-  render();
   if (e.preventDefault) {
     e.preventDefault();
     e.stopPropagation();
-    e.cancelBubble = true;
   }
+  e.cancelBubble = true;
+  render();
+  return false;
 }
 function mouseMove(e) {
   var e = e || window.event;
@@ -510,12 +510,13 @@ function mouseMove(e) {
       // map view space to cell coordinates.
       var cx = Math.floor((orgX + ptX) / zoom);
       var cy = Math.floor((orgY + ptY) / zoom);
-      line(lastX, lastY, cx, cy, pen);
+      line(lastX, lastY, cx, cy, e.button ? 0 : pen);
       lastX = cx;
       lastY = cy;
       render();
     }
   }
+  return false;
 }
 function mouseUp(e) {
   var e = e || window.event;
@@ -524,8 +525,9 @@ function mouseUp(e) {
   if (e.preventDefault) {
     e.preventDefault();
     e.stopPropagation();
-    e.cancelBubble = true;
   }
+  e.cancelBubble = true;
+  return false;
 }
 
 function line(x0,y0,x1,y1,val) {
@@ -592,6 +594,16 @@ function point(x, y, val) {
 window.document.body.addEventListener("mousedown", mouseDown, false);
 window.document.body.addEventListener("mousemove", mouseMove, false);
 window.document.body.addEventListener("mouseup", mouseUp, false);
+
+function noMenu(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  return false;
+}
+
+canvas.addEventListener('contextmenu', noMenu, false);
+window.document.body.addEventListener('contextmenu', noMenu, false);
+window.addEventListener('contextmenu', noMenu, false);
 
 function touchStart(e) {
   if (e.touches && e.touches[0]) {
