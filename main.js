@@ -127,6 +127,7 @@ function doSync() {
 
     var backoff = 10000;
     document.getElementById('status').innerHTML = "ONLINE";
+    document.getElementById('status').style.color = "#209020";
     // obtain a unique ID for this device if we don't have one.
     if (!myLayer.id) {
       // no ID, start by getting one.
@@ -148,6 +149,7 @@ function doSync() {
     console.log('SockJS close');
     sock = null;
     document.getElementById('status').innerHTML = "OFFLINE";
+    document.getElementById('status').style.color = "#902020";
     backoff = Math.floor(backoff * 1.3);
     if (backoff > 300000) backoff = 300000;
     window.setTimeout(doSync, backoff);

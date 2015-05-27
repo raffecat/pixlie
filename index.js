@@ -72,6 +72,24 @@ MongoClient.connect(url, function(err, db) {
       });
     };
 
+    // fetch layer data for one layer.
+    sockOps['loadLayer'] = function (data) {
+      var id = data.id;
+      layerData.findOne({_id:id}, function(err, res) {
+        if (err) {
+          console.log("Cannot load layer:", id, err);
+          return send({ op: "didLoad", id: id, error: true });
+        }
+        return send({
+          op: "didLoad",
+          id: res._id,
+          ver: res.ver,
+          grid: res.grid,
+          gridTop: res.gridTop
+        });
+      });
+    };
+
     // the client will send this when it has changes to upload.
     sockOps['pushLayer'] = function (data) {
       if (data && data.id && data.token && data.grid && data.gridTop != null) {
@@ -91,8 +109,14 @@ MongoClient.connect(url, function(err, db) {
                 console.log("Cannot upsert:", id, err);
                 return send({ op: "didPush", error: true });
               }
-              console.log("Saved layer:", id);
-              return send({ op: "didPush", saved: true });
+              layers.update({_id:id}, {$set:{ ver: fields.ver }}, function (err) {
+                if (err) {
+                  console.log("Cannot update layer version:", id, err);
+                  return send({ op: "didPush", error: true });
+                }
+                console.log("Saved layer:", id);
+                return send({ op: "didPush", saved: true });
+              });
             });
           } else {
             console.log("Did not find layer.");
