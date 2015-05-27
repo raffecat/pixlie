@@ -8,6 +8,28 @@ var ObjectID = require('mongodb').ObjectID;
 var app = express();
 var server = require('http').Server(app);
 
+function remove(arr, item) {
+  for (var i=0; i<arr.length; i++) {
+    if (arr[i] === item) {
+      arr.splice(i,1);
+      return;
+    }
+  }
+}
+
+var users = [];
+
+function broadcast(sender, data) {
+  var payload = JSON.stringify(data);
+  console.log("Broadcast:", data.id);
+  for (var i=0; i<users.length; i++) {
+    var conn = users[i];
+    if (conn !== sender && conn.writable) {
+      conn.write(payload);
+    }
+  }
+}
+
 var url = 'mongodb://localhost:27017/pixlie';
 MongoClient.connect(url, function(err, db) {
   if (err) throw err;
@@ -25,6 +47,7 @@ MongoClient.connect(url, function(err, db) {
 
   sockServ.on('connection', function(conn) {
     console.log("SockJS connection");
+    users.push(conn);
 
     function send(data) {
       if (conn.writable) {
@@ -115,6 +138,17 @@ MongoClient.connect(url, function(err, db) {
                   return send({ op: "didPush", error: true });
                 }
                 console.log("Saved layer:", id);
+                // notify all connected clients.
+                // include all metadata so clients can sort new layers.
+                broadcast(conn, {
+                  op: "change",
+                  id: id,
+                  ver: fields.ver,
+                  ts: obj.ts,
+                  depth: obj.depth,
+                  grid: data.grid,
+                  gridTop: data.gridTop
+                });
                 return send({ op: "didPush", saved: true });
               });
             });
@@ -140,6 +174,7 @@ MongoClient.connect(url, function(err, db) {
 
     conn.on('close', function() {
       console.log("SockJS close");
+      remove(users, conn);
     });
 
   });

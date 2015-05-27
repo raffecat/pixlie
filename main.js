@@ -359,6 +359,7 @@ sockOps['didLoad'] = function (data) {
   if (gettingLayer && gettingCB) {
     var err = null;
     if (data.ver && data.ver > 0 && data.grid && data.gridTop != null && data.id != myLayer.id) {
+      delete data.op;
       gettingLayer.ver = data.ver;
       gettingLayer.gridTop = data.gridTop;
       gettingLayer.grid = migrateGrid(data.grid);
@@ -380,6 +381,45 @@ sockOps['didLoad'] = function (data) {
     cb(err);
   }
 };
+
+sockOps['change'] = function (data) {
+  // Receive the response to the last getLayer request.
+  console.log("Received change:", data.id);
+  var err = null;
+  if (data.id && data.ver > 0 && data.grid && data.gridTop != null && data.id != myLayer.id) {
+    delete data.op;
+    var layer = findLayer(data.id);
+    if (layer) {
+      // update the displayed layer.
+      layer.ver = data.ver;
+      layer.gridTop = data.gridTop;
+      layer.grid = data.grid;
+    } else {
+      // we don't have the layer; add it to the layer index.
+      layers.push(data);
+      sortLayers();
+    }
+    // refresh the display.
+    render();
+    // save the layer in the local db.
+    db.put(data.id, JSON.stringify(data), function (err) {
+      if (err) {
+        // not a problem, it's only a cache.
+        console.log("Could not store changed layer in local DB:", data.id, err);
+      } else {
+        console.log("Saved changed layer in local DB:", data.id);
+      }
+    });
+  } else {
+    console.log("Invalid change data.");
+  }
+};
+
+function findLayer(id) {
+  for (var i=0; i<layers.length; i++) {
+    if (layers[i].id === id) return layers[i];
+  }
+}
 
 
 // Drawing canvas.
