@@ -51,20 +51,34 @@ var myLayer = {
 };
 
 function migrateGrid(grid) {
-  if (typeof grid[0] === 'number') return grid;
-  var res = [];
-  for (var y=0; y<grid.length; y++) {
-    var row = grid[y];
-    if (row) {
-      var left = row[0] || 0;
-      var str = "";
-      for (var x=1; x<row.length; x++) {
-        var ch = row[x] || 0;
-        str += String.fromCharCode(32+ch);
+  if (typeof grid[0] === 'number') {
+    // fix up some bad grids with [0,0] in the middle.
+    var res = [];
+    for (var y=0; y<grid.length; y++) {
+      var row = grid[y];
+      if (row instanceof Array) {
+        res.push(0, " ");
+      } else {
+        res.push(row);
       }
-      res.push(left, str||" ");
-    } else {
-      res.push(0, " ");
+    }
+    return res;
+  } else {
+    // migrate old arrays format.
+    var res = [];
+    for (var y=0; y<grid.length; y++) {
+      var row = grid[y];
+      if (row) {
+        var left = row[0] || 0;
+        var str = "";
+        for (var x=1; x<row.length; x++) {
+          var ch = row[x] || 0;
+          str += String.fromCharCode(32+ch);
+        }
+        res.push(left, str||" ");
+      } else {
+        res.push(0, " ");
+      }
     }
   }
   return res;
@@ -388,6 +402,7 @@ sockOps['change'] = function (data) {
   var err = null;
   if (data.id && data.ver > 0 && data.grid && data.gridTop != null && data.id != myLayer.id) {
     delete data.op;
+    data.grid = migrateGrid(data.grid);
     var layer = findLayer(data.id);
     if (layer) {
       // update the displayed layer.
