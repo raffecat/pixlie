@@ -4,13 +4,8 @@ var level = require('level-browserify');
 
 (function(){
 
-// 1) Create our database, supply location and options.
-//    This will create or open the underlying LevelDB store/Indexedb Database
-var db = level('./mydb');
 
-var gridTop = 0;
-var grid = null;
-var myId = null;
+// Message UI.
 
 var msgTimer = null;
 var msgFade = 1.0;
@@ -22,7 +17,7 @@ function showMsg(msg, time) {
     div.style.display = "block";
     div.style.opacity = 1.0;
     msgFade = 1.0;
-    if (msgTimer) window.cancelTimeout(msgTimer);
+    if (msgTimer) window.clearTimeout(msgTimer);
     msgTimer = window.setTimeout(fadeMsg, time || 3000);
   }
 }
@@ -40,31 +35,73 @@ function fadeMsg() {
   }
 }
 
+
+// Local DB.
+
+var db = level('./mydb');
+var pending = false;
+var saving = false;
+var loaded = false;
+
+var myLayer = {
+  id: null,
+  token: null,
+  gridTop: 0,
+  grid: [[0,0]]
+};
+
 function load() {
   db.get('local', function (err, value) {
     if (err) {
       showMsg("Could not restore your pixels!");
       return console.log('Could not restore:', err);
     }
-    if (value && !err) {
-      obj = JSON.parse(value);
-      if (obj && obj.grid) {
-        gridTop = obj.gridTop;
-        grid = obj.grid;
-        myId = obj.myId;
+    if (value) {
+      myLayer = JSON.parse(value);
+      // fix hack.
+      delete myLayer.myId;
+      delete myLayer.myToken;
+      if (myLayer.id === "--") {
+        myLayer.id = null;
+        myLayer.token = null;
       }
     }
-    if (!grid) {
-      gridTop = 0;
-      grid = [[0,0]];
-      myId = null;
-    }
-    if (typeof(gridTop) != 'number') gridTop = 0;
+    if (!myLayer.grid) myLayer.grid = [[0,0]];
+    if (typeof(myLayer.gridTop) != 'number') myLayer.gridTop = 0;
+    loaded = true;
     render();
-    showMsg("Ready!", 1000);
     doSync();
   });
 }
+function dirty() {
+  if (!pending) {
+    console.log("Dirty.");
+    pending = true;
+    needPush = true;
+    window.setTimeout(saveNow, 2000);
+  }
+}
+function saveNow(cb) {
+  if (loaded && myLayer.grid) {
+    console.log("Saving now.");
+    pending = false;
+    saving = true;
+    var data = JSON.stringify(myLayer);
+    db.put('local', data, function (err) {
+      if (err) {
+        showMsg("Could not save your pixels!");
+        return console.log('Could not save:', err);
+      }
+      saving = false;
+      if (needPush) pushLayer();
+      if (cb) cb();
+    });
+  }
+}
+
+
+
+// SockJS.
 
 var sock;
 var sockOps = {};
@@ -72,29 +109,33 @@ var backoff = 10000;
 var needPush = true;
 var pushing = false;
 function send(data) {
-  sock.send(JSON.stringify(data));
+  if (sock) {
+    sock.send(JSON.stringify(data));
+  }
 }
 
 function doSync() {
   if (!window.SockJS) {
     return console.log("Missing SockJS");
   }
-
   console.log("Starting sync: ", window.location.host);
   sock = new SockJS('http://'+window.location.host+'/socket');
   sock.onopen = function() {
     console.log('SockJS open');
+
+    showMsg("Synchronizing...", 60000);
+
     var backoff = 10000;
     document.getElementById('status').innerHTML = "ONLINE";
     // obtain a unique ID for this device if we don't have one.
-    if (!myId) {
+    if (!myLayer.id) {
       // no ID, start by getting one.
       console.log("Requesting an ID.");
       send({ op: 'getID' });
     } else {
       // have an id, so now try to push our layer.
-      console.log("Have an ID: "+myId);
-      pushLayer();
+      console.log("Have an ID: "+myLayer.id);
+      pullIndex();
     }
   };
   sock.onmessage = function(e) {
@@ -105,70 +146,205 @@ function doSync() {
   };
   sock.onclose = function() {
     console.log('SockJS close');
+    sock = null;
     document.getElementById('status').innerHTML = "OFFLINE";
     backoff = Math.floor(backoff * 1.3);
     if (backoff > 300000) backoff = 300000;
     window.setTimeout(doSync, backoff);
+    showMsg("Offline!", 1000);
   };
 }
 
 sockOps['assignID'] = function (data) {
-  console.log("Received an ID", data);
-  if (data && data.id && !myId) {
-    myId = data.id;
+  if (myLayer.id) return;
+  if (data && data.id && data.token) {
+    console.log("Received ID:", data.id);
+    myLayer.id = data.id;
+    myLayer.token = data.token;
+    pullIndex();
     // autosave the ID and push the layer.
     dirty();
+  } else {
+    console.log("Error getting an ID:", data);
   }
 };
 
+function pushLayer() {
+  if (loaded && myLayer.id && myLayer.grid) {
+    console.log("Pushing now.");
+    needPush = false;
+    pushing = true;
+    send({
+      op: 'pushLayer',
+      id: myLayer.id,
+      token: myLayer.token,
+      gridTop: myLayer.gridTop,
+      grid: myLayer.grid
+    });
+  }
+}
+
 sockOps['didPush'] = function (data) {
+  if (data && data.error) {
+    console.log("Error pushing layer: "+data.error);
+    showMsg("Cannot upload your pixels!", 5000, true);
+    return;
+  }
   console.log("Did push layer.");
   pushing = false;
   if (needPush) pushLayer();
 };
 
-var pending = false;
-var saving = false;
-function dirty() {
-  if (!pending) {
-    console.log("Dirty.");
-    pending = true;
-    needPush = true;
-    window.setTimeout(saveNow, 2000);
+function pullIndex() {
+  // Pull down the current layer index, which contains the layer ids
+  // and their current version numbers and priority order.
+  console.log("Requesting layer index.");
+  send({ op: 'getIndex' });
+}
+
+var layers = [];
+function sortLayers() {
+  layers.sort(function(a,b){
+    var ad = a.depth || 0;
+    var bd = b.depth || 0;
+    var ats = a.ts || 0;
+    var bts = b.ts || 0;
+    if (ad === bd) {
+      // same depth, sort on timestamp.
+      if (ats === bts) {
+        // same timestamp, sort on ID.
+        return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
+      } else {
+        return ats < bts ? -1 : (ats > bts ? 1 : 0);
+      }
+    } else {
+      // sort on depth.
+      return ad < bd ? -1 : (ad > bd ? 1 : 0);
+    }
+  });
+}
+sockOps['index'] = function (data) {
+  console.log("Received index:", data);
+  // before replacing the layer index, grab all the layers we have already loaded.
+  var existing = {};
+  for (var i=0; i<layers.length; i++) {
+    var layer = layers[i];
+    if (layer.id && layer.ver && layer.grid) {
+      existing[layer.id] = layer;
+    }
+  }
+  // replace the layer index.
+  layers = data.layers || [];
+  if (typeof layers.length !== 'number') layers = [];
+  // restore the loaded data for existing layers.
+  var foundMe = false;
+  for (var i=0; i<layers.length; i++) {
+    var layer = layers[i];
+    if (layer.id === myLayer.id && myLayer.id) {
+      // found the local layer; attach our local data.
+      layers[i] = myLayer;
+      foundMe = true;
+    } else if (layer.id && layer.ver && existing.hasOwnProperty(layer.id)) {
+      // found a layer we already have loaded.
+      // check if the layer version has changed (we need to download it again)
+      var old = existing[layer.id];
+      if (old && old.id === layer.id && old.ver === layer.ver && old.grid) {
+        layer.grid = old.grid;
+        layer.gridTop = old.gridTop;
+      }
+    }
+  }
+  if (!foundMe) {
+    layers.push(myLayer);
+  }
+  // sort layers for rendering.
+  sortLayers();
+  pullDownLayers();
+};
+
+var pullTimer = null;
+
+function pullDownLayers() {
+  if (!pullTimer && sock) {
+    pullTimer = window.setTimeout(loadNextLayer, 100);
   }
 }
-function saveNow(cb) {
-  console.log("Saving now.");
-  pending = false;
-  saving = true;
-  var obj = {
-    gridTop: gridTop,
-    grid: grid,
-    myId: myId
-  };
-  var data = JSON.stringify(obj);
-  db.put('local', data, function (err) {
-    if (err) {
-      showMsg("Could not save your pixels!");
-      return console.log('Could not save:', err);
+
+function loadNextLayer() {
+  pullTimer = null;
+  // start loading the next layer.
+  for (var i=0; i<layers.length; i++) {
+    var layer = layers[i];
+    if (layer.id && layer.id !== myLayer.id && !layer.grid) {
+      // load this layer.
+      loadLayer(layer.id, layer, function (err) {
+        if (err) console.log("Error loading layer:", layer.id, err);
+        if (!pullTimer && sock) {
+          pullTimer = window.setTimeout(loadNextLayer, 100);
+        }
+        render();
+      });
+      return;
     }
-    saving = false;
-    if (needPush) pushLayer();
-    if (cb) cb();
+  }
+  showMsg("Ready!", 1000);
+  if (needPush) pushLayer();
+}
+
+var gettingLayer = null;
+var gettingCB = null;
+function loadLayer(id, layer, cb) {
+  // check if we have a local copy of this layer.
+  console.log("Loading layer:", id);
+  db.get(layer.id, function (err, value) {
+    if (err) return cb(err);
+    if (value) {
+      try {
+        var obj = JSON.parse(value);
+      } catch (err) {
+        return cb(err);
+      }
+      if (obj && obj.grid && obj.gridTop != null && obj.ver != null && obj.ver === layer.ver) {
+        // our local copy is the same as the server copy.
+        console.log("Already up to date:", id);
+        layer.gridTop = obj.gridTop;
+        layer.grid = obj.grid;
+        return cb(null);
+      }
+    }
+    // the server version differs, or we don't have a local copy yet.
+    console.log("Downloading layer:", id);
+    gettingLayer = layer;
+    gettingCB = cb;
+    send({
+      op: 'loadLayer',
+      id: layer.id
+    });
+    // NO cb() here, wait for getLayer response.
   });
 }
 
-function pushLayer() {
-  console.log("Pushing now.");
-  needPush = false;
-  pushing = true;
-  send({
-    op: 'pushLayer',
-    id: myId,
-    gridTop: gridTop,
-    grid: grid
-  });
-}
+sockOps['didLoad'] = function (data) {
+  // Receive the response to the last getLayer request.
+  console.log("Received layer download:", data.id, data.error);
+  if (gettingLayer && gettingCB) {
+    var err = null;
+    if (data.ver && data.ver > 0 && data.grid && data.gridTop != null && data.id != myLayer.id) {
+      gettingLayer.ver = data.ver;
+      gettingLayer.gridTop = data.gridTop;
+      gettingLayer.grid = data.grid;
+    } else {
+      err = data.error || "invalid layer data";
+    }
+    gettingLayer = null;
+    var cb = gettingCB;
+    gettingCB = null;
+    cb(err);
+  }
+};
+
+
+// Drawing canvas.
 
 var canvas = document.getElementById('c');
 var width, height;
@@ -275,16 +451,19 @@ function line(x0,y0,x1,y1,val) {
 }
 
 function point(x, y, val) {
-  if (!grid) return;
+  if (!loaded) return;
+  var top = myLayer.gridTop;
+  var grid = myLayer.grid;
   x = Math.floor(x);
   y = Math.floor(y);
-  while (y < gridTop) {
+  while (y < top) {
     // add a line at the top of the grid (top-down)
     grid.unshift([0,0]);
-    gridTop -= 1;
+    top -= 1;
   }
+  myLayer.gridTop = top;
   // move Y into grid space
-  y -= gridTop;
+  y -= top;
   while (y >= grid.length) {
     // add a line at the bottom of the grid (top-down)
     grid.push([0,0]);
@@ -433,7 +612,7 @@ function bind(id, msg, func) {
     e.cancelBubble = true;
   }
   var el = document.getElementById(id);
-  el.addEventListener(msg, clicked);
+  el.addEventListener(msg, clicked, false);
   el = null;
 }
 function hide(id) {
@@ -473,7 +652,9 @@ function render() {
   //ctx.fillRect(0, 0, width, height);
   ctx.clearRect(0, 0, width, height);
 
-  if (!grid) return;
+  if (!loaded) return;
+  var grid = myLayer.grid;
+  var gridTop = myLayer.gridTop;
 
   // top,left edge of screen in view space.
   var ptX = -width/2;

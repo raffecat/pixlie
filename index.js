@@ -16,27 +16,6 @@ MongoClient.connect(url, function(err, db) {
   var layers = db.collection("layers");
   var layerData = db.collection("layerdata");
 
-  function assignID(cb) {
-    var id = uid(30);
-    console.log("new Id:", id);
-    var doc = {_id:id, ver:0};
-    layers.insert(doc, function (err, res) {
-      if (err) return cb(err);
-      if (res && res.writeError) return cb(new Error("Conflict: "+res.writeError));
-      return cb(null, doc._id.toString());
-    });
-  }
-
-  function loadIndex(cb) {
-    layers.find({}).toArray(function(err, res) {
-      if (err) return cb(new Error("Cannot list layer index."));
-      res = res.map(function(doc){
-        return { id: doc._id.toString(), ver: doc.ver||0 };
-      });
-      cb(null, res);
-    });
-  }
-
   app.use(express.static('.'));
 
   app.get('/', function (req, res) {
@@ -61,37 +40,72 @@ MongoClient.connect(url, function(err, db) {
 
     // the client will send this if it needs an id for the device.
     sockOps['getID'] = function (data) {
-      console.log("getID", data);
-      assignID(function (err, id) {
-        if (err) return console.log(err);
-        if (id) send({ op: "assignID", id: id });
+      var id = uid(30);
+      var token = uid(60);
+      console.log("New ID:", id);
+      var doc = {_id:id, token:token, ver:0, ts:Date.now()};
+      layers.insert(doc, function (err, res) {
+        if (err) {
+          console.log("Cannot insert ID:", id, err);
+          return send({ op: "assignID", error: true });
+        }
+        if (res && res.writeError) {
+          console.log("Cannot insert ID:", id, res.writeError);
+          return send({ op: "assignID", error: true });
+        }
+        return send({ op: "assignID", id: id, token: token });
+      });
+    };
+
+    // the client will send this to load the layer index.
+    sockOps['getIndex'] = function (data) {
+      layers.find({ ver:{$gt:0} }).toArray(function(err, res) {
+        if (err) {
+          console.log("Cannot list layer index.", err);
+          return send({ op: "index", error: true });
+        }
+        res = res.map(function(doc){
+          return {
+            id: doc._id,
+            ver: doc.ver,
+            ts: doc.ts,
+            depth: doc.depth
+          };
+        });
+        return send({ op: "index", layers: res });
       });
     };
 
     // the client will send this when it has changes to upload.
     sockOps['pushLayer'] = function (data) {
-      if (data) {
-        console.log("pushLayer", data.id, data.gridTop, data.grid && data.grid.length);
-      }
-      if (data && data.id && data.grid && data.gridTop != null) {
-        // validate layer id.
-        var saveId = data.id;
-        delete data.id;
-        layers.findOne({_id:saveId}, function (err, obj) {
+      if (data && data.id && data.token && data.grid && data.gridTop != null) {
+        // validate layer id and token.
+        var id = data.id;
+        layers.findOne({ _id: id, token: data.token }, function (err, obj) {
           if (err) return console.log(err);
           if (obj) {
-            // valid id, accept the layer data.
-            layerData.update({_id:saveId}, data, {upsert:true}, function (err) {
-              if (err) return console.log(err);
-              console.log("Saved layer data.");
-              send({ op: "didPush" });
+            // correct id and token; save the new layer version.
+            var fields = {
+              ver: (obj.ver||0) + 1,
+              grid: data.grid,
+              gridTop: data.gridTop
+            };
+            layerData.update({_id:id}, {$set:fields}, {upsert:true}, function (err) {
+              if (err) {
+                console.log("Cannot upsert:", id, err);
+                return send({ op: "didPush", error: true });
+              }
+              console.log("Saved layer:", id);
+              return send({ op: "didPush", saved: true });
             });
           } else {
             console.log("Did not find layer.");
+            return send({ op: "didPush", error: true });
           }
         });
       } else {
-        console.log("Bad push data.");
+        console.log("Bad push data:", data && data.id);
+        return send({ op: "didPush", error: true });
       }
     };
 
