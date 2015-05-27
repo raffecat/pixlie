@@ -656,10 +656,6 @@ function render() {
   //ctx.fillRect(0, 0, width, height);
   ctx.clearRect(0, 0, width, height);
 
-  if (!loaded) return;
-  var grid = myLayer.grid;
-  var gridTop = myLayer.gridTop;
-
   // top,left edge of screen in view space.
   var ptX = -width/2;
   var ptY = -height/2;
@@ -680,27 +676,33 @@ function render() {
   var cellsX = Math.ceil((width + zoom - 1) / zoom);
   var cellsY = Math.ceil((height + zoom - 1) / zoom);
 
-  // render pixels.
-  var rowY = viewY;
-  for (var y=0; y<cellsY; y++) {
-    var rowX = viewX;
-    var row = grid[topCell + y - gridTop];
-    if (row && row.length) {
-      var rowLeft = row[0]; // row origin at index zero.
-      var i = leftCell - rowLeft;
-      for (var x=0; x<cellsX; x++) {
-        if (i >= 0) {
-          var col = row[i+1] || 0; // +1 to skip over row origin.
-          if (col) {
-            ctx.fillStyle = palette[col];
-            ctx.fillRect(rowX, rowY, zoom, zoom);
+  for (var j=0; j<layers.length; j++) {
+    var grid = layers[j].grid;
+    var gridTop = layers[j].gridTop;
+    if (grid && gridTop != null) {
+      // render pixels.
+      var rowY = viewY;
+      for (var y=0; y<cellsY; y++) {
+        var rowX = viewX;
+        var row = grid[topCell + y - gridTop];
+        if (row && row.length) {
+          var rowLeft = row[0]; // row origin at index zero.
+          var i = leftCell - rowLeft;
+          for (var x=0; x<cellsX; x++) {
+            if (i >= 0) {
+              var col = row[i+1] || 0; // +1 to skip over row origin.
+              if (col) {
+                ctx.fillStyle = palette[col];
+                ctx.fillRect(rowX, rowY, zoom, zoom);
+              }
+            }
+            rowX += zoom;
+            i += 1;
           }
         }
-        rowX += zoom;
-        i += 1;
+        rowY += zoom;
       }
     }
-    rowY += zoom;
   }
 
   // grid lines.
