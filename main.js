@@ -47,7 +47,7 @@ var myLayer = {
   id: null,
   token: null,
   gridTop: 0,
-  grid: [[0,0]]
+  grid: [0," "]
 };
 
 function migrateGrid(grid) {
@@ -87,7 +87,7 @@ function load() {
         myLayer.token = null;
       }
     }
-    if (!myLayer.grid) myLayer.grid = [[0,0]];
+    if (!myLayer.grid) myLayer.grid = [0," "];
     if (typeof(myLayer.gridTop) != 'number') myLayer.gridTop = 0;
     loaded = true;
     doSync();
