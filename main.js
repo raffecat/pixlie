@@ -50,6 +50,26 @@ var myLayer = {
   grid: [[0,0]]
 };
 
+function migrateGrid(grid) {
+  if (typeof grid[0] === 'number') return grid;
+  var res = [];
+  for (var y=0; y<grid.length; y++) {
+    var row = grid[y];
+    if (row) {
+      var left = row[0] || 0;
+      var str = "";
+      for (var x=1; x<row.length; x++) {
+        var ch = row[x] || 0;
+        str += String.fromCharCode(32+ch);
+      }
+      res.push(left, str||" ");
+    } else {
+      res.push(0, " ");
+    }
+  }
+  return res;
+}
+
 function load() {
   db.get('local', function (err, value) {
     if (err && err.name != "NotFoundError") {
@@ -58,6 +78,7 @@ function load() {
     }
     if (value) {
       myLayer = JSON.parse(value);
+      myLayer.grid = migrateGrid(myLayer.grid);
       // fix hack.
       delete myLayer.myId;
       delete myLayer.myToken;
@@ -314,7 +335,7 @@ function loadLayer(id, layer, cb) {
         // our local copy is the same as the server copy.
         console.log("Already up to date:", id);
         layer.gridTop = obj.gridTop;
-        layer.grid = obj.grid;
+        layer.grid = migrateGrid(obj.grid);
         return cb(null);
       } else {
         console.log("Layer in local DB is out of date:", id, "local:", obj.ver, "remote:", layer.ver);
@@ -340,7 +361,7 @@ sockOps['didLoad'] = function (data) {
     if (data.ver && data.ver > 0 && data.grid && data.gridTop != null && data.id != myLayer.id) {
       gettingLayer.ver = data.ver;
       gettingLayer.gridTop = data.gridTop;
-      gettingLayer.grid = data.grid;
+      gettingLayer.grid = migrateGrid(data.grid);
       // save the layer in the local db.
       db.put(data.id, JSON.stringify(data), function (err) {
         if (err) {
@@ -475,28 +496,40 @@ function point(x, y, val) {
   y = Math.floor(y);
   while (y < top) {
     // add a line at the top of the grid (top-down)
-    grid.unshift([0,0]);
+    grid.unshift(0, " ");
     top -= 1;
   }
   myLayer.gridTop = top;
   // move Y into grid space
   y -= top;
+  y = y * 2; // index in grid array.
   while (y >= grid.length) {
     // add a line at the bottom of the grid (top-down)
-    grid.push([0,0]);
+    grid.push(0, " ");
   }
-  var row = grid[y];
-  if (!(row && row.length)) return;
-  while (x < row[0]) {
+  var left = grid[y];
+  var str = grid[y+1];
+  if (!str) return;
+  while (x < left) {
     // extend the row to the left.
-    row.splice(1, 0, 0);
-    row[0] -= 1;
+    str = " "+str;
+    left -= 1;
   }
   // move X into grid space
-  x -= row[0];
-  if (x >= 0) {
-    row[x+1] = val; // advance past row origin at index zero
+  x -= left;
+  if (x == 0) {
+    // replace the first character.
+    str = String.fromCharCode(32+val) + str.substr(1);
+  } else if (x > 0) {
+    // extend the row to the right.
+    while (x >= str.length) {
+      str += " ";
+    }
+    // replace a character in the string.
+    str = str.substr(0,x) + String.fromCharCode(32+val) + str.substr(x+1);
   }
+  grid[y] = left;
+  grid[y+1] = str;
   // autosave
   dirty();
 }
@@ -697,15 +730,16 @@ function render() {
       var rowY = viewY;
       for (var y=0; y<cellsY; y++) {
         var rowX = viewX;
-        var row = grid[topCell + y - gridTop];
-        if (row && row.length) {
-          var rowLeft = row[0]; // row origin at index zero.
+        var idx = 2 * (topCell + y - gridTop);
+        var str = grid[idx+1];
+        if (str) {
+          var rowLeft = grid[idx];
           var i = leftCell - rowLeft;
           for (var x=0; x<cellsX; x++) {
             if (i >= 0) {
-              var col = row[i+1] || 0; // +1 to skip over row origin.
-              if (col) {
-                ctx.fillStyle = palette[col];
+              var col = str.charCodeAt(i);
+              if (col > 32) {
+                ctx.fillStyle = palette[col-32];
                 ctx.fillRect(rowX, rowY, zoom, zoom);
               }
             }
