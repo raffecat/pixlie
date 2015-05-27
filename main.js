@@ -52,7 +52,7 @@ var myLayer = {
 
 function load() {
   db.get('local', function (err, value) {
-    if (err) {
+    if (err && err.name != "NotFoundError") {
       showMsg("Could not restore your pixels!");
       return console.log('Could not restore:', err);
     }
@@ -297,7 +297,9 @@ function loadLayer(id, layer, cb) {
   // check if we have a local copy of this layer.
   console.log("Loading layer:", id);
   db.get(layer.id, function (err, value) {
-    if (err) return cb(err);
+    if (err && err.name != "NotFoundError") {
+      return cb(err);
+    }
     if (value) {
       try {
         var obj = JSON.parse(value);

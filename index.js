@@ -16,11 +16,7 @@ MongoClient.connect(url, function(err, db) {
   var layers = db.collection("layers");
   var layerData = db.collection("layerdata");
 
-  app.use(express.static('.'));
-
-  app.get('/', function (req, res) {
-    res.sendfile(__dirname + '/index.html');
-  });
+  app.use(express.static('static'));
 
   var sockServ = sockjs.createServer({
     sockjs_url: 'http://cdn.jsdelivr.net/sockjs/1.0.0/sockjs.min.js',
@@ -125,7 +121,7 @@ MongoClient.connect(url, function(err, db) {
   });
 
   sockServ.installHandlers(server);
-  server.listen(9966);
+  server.listen(80);
 
   //db.close();
 });
