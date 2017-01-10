@@ -1,0 +1,11 @@
+#!/bin/bash -e
+
+# install the pixlie site
+sudo cp -f /home/mario/pixlie/nginx/pixlie.conf /etc/nginx/conf.d/pixlie.conf
+sudo chmod 0600 /etc/nginx/conf.d/pixlie.conf
+sudo chown root:root /etc/nginx/conf.d/pixlie.conf
+
+# update nginx
+sudo nginx -t
+sudo service nginx reload
+
