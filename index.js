@@ -180,7 +180,7 @@ MongoClient.connect(url, function(err, db) {
   });
 
   sockServ.installHandlers(server);
-  server.listen(+process.argv[2] || 80);
+  server.listen(+process.argv[2] || 8080);
 
   //db.close();
 });
